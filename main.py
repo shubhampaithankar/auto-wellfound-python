@@ -19,7 +19,8 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 count = 0
 limit = 15
 reason = ""
-#todo: add companies to the following lists based on action
+
+#todo: add job to the following lists based on action, store in mysql db
 applied = []
 rejected = []
 
@@ -104,16 +105,27 @@ async def load_companies(driver: webdriver.Chrome):
 
 async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement], company_name: str):
     try:
-        global count, reason
+        global count, reason, applied, rejected
         for job in job_listings:
             position = "Position not found"
             remote_policy = "Remote policy not found"
             compensation = "Compensation not found"
 
+            # job object to store
+            job_obj = {
+                company_name: company_name,
+                position: position,
+                remote_policy: remote_policy,
+                compensation: compensation,
+                skills: '',
+                description: ''
+            }
+
             # Check position
             try: 
                 position_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_title__xpQDw"]')
                 position: str = await position_dom.text
+                job_obj['position'] = position
 
                 await driver.sleep(0.5)
             except: 
@@ -124,6 +136,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
             try: 
                 location_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_locations__HHbZs"]')
                 remote_policy = get_proper_string(await location_dom.text)
+                job_obj['remote_policy'] = remote_policy
 
                 if "in office" in remote_policy:
                     reason = f'{position} is not remote'
@@ -138,6 +151,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
             try: 
                 compensation_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_compensation__3JnvU"]')
                 compensation: str = get_proper_string(await compensation_dom.text)
+                job_obj['compensation'] = compensation
                 # await driver.sleep(1)
             except:                     
                 reason = f"{compensation}"
@@ -172,7 +186,8 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                     reason = f"Either already applied or not accepting from location"
                     continue
 
-                try: skills: WebElement = await modal.find_element(By.XPATH, './/div[@class="flex flex-col gap-2"]')
+                try: 
+                    skills: WebElement = await modal.find_element(By.XPATH, './/div[@class="flex flex-col gap-2"]')
                 except:
                     print("Skills not found")
                     skills = None
@@ -181,6 +196,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                     await scroll_to(modal, skills)
 
                     skillsText = get_proper_string(await skills.text)
+                    job_obj['skills'] = skillsText
 
                     good_word = next((skill for skill in good_skills if skill.lower() in skillsText), False)
                     if not good_word:
@@ -203,6 +219,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 await scroll_to(modal, description_dom)
 
                 description = get_proper_string(await description_dom.text)
+                job_obj['description'] = description
 
                 required_experience = re.compile(r'(?:\(\s*(\d+)\s*\)|(\d+))?\s*[-to]*\s*(\d+)?\+?\s*(year|yr)s?', re.IGNORECASE)
                 match = required_experience.search(description)
@@ -230,9 +247,12 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 except: print("Text area not found")
 
                 await apply_button.click()
+                applied.append(job_obj)
                 count += 1
-            except WebDriverException as e: 
+            except WebDriverException as e:
                 print(e)
+                job_obj['reason'] = reason
+                rejected.append(job_obj)
                 continue
             finally:
                 if await close_button.is_displayed():
@@ -328,6 +348,15 @@ async def start_applying(driver: webdriver.Chrome):
         print(f"Error during start_applying")
         raise e
 
+async def store_jobs():
+    try:
+        if len(applied) > 0:
+            return
+        
+        if len(rejected) > 0:
+            return
+    except Exception as e:
+        raise e
 
 async def main():
     options = webdriver.ChromeOptions()
