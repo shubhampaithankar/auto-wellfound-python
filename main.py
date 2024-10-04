@@ -19,6 +19,9 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 count = 0
 limit = 15
 reason = ""
+#todo: add companies to the following lists based on action
+applied = []
+rejected = []
 
 async def login(driver: webdriver.Chrome, retries=3):
     try:
@@ -157,7 +160,6 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 print("Modal close button not found")
                 continue
             
-
             try:
                 try: 
                     apply_button: WebElement = await modal.find_element(By.XPATH, '//div[@class="styles_component__AUM9C flex flex-row justify-end"]/*[1]')
@@ -290,7 +292,7 @@ async def start_applying(driver: webdriver.Chrome):
                     reason = f"Zero job listings found"
                     continue
 
-                # await process_jobs(driver, job_listings, company_name)
+                await process_jobs(driver, job_listings, company_name)
 
                 # hide company
                 await hide_button.click()
