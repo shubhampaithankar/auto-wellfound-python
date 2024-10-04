@@ -16,10 +16,13 @@ from config.secrets import *
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
+count = 0
+limit = 15
+reason = ""
 
-async def login(driver: webdriver.Chrome):
+async def login(driver: webdriver.Chrome, retries=3):
     try:
-        try: email_field = await driver.find_element(By.XPATH, '//input[@placeholder="Email"]', timeout=5)
+        try: email_field = await driver.find_element(By.XPATH, '//input[@placeholder="Email"]', timeout=15)
         except NoSuchElementException as e: 
             print("Email field not found")
             raise e
@@ -48,9 +51,12 @@ async def login(driver: webdriver.Chrome):
         await driver.sleep(5)
 
         # wait till redirect to jobs page
-
         if await driver.current_url != 'https://wellfound.com/jobs':
-            await login(driver)
+            if retries > 0:
+                print("Login failed, retrying...")
+                return await login(driver, retries=retries - 1)
+            else:
+                raise WebDriverException("Failed to login after multiple attempts")
 
         await driver.sleep(1)
 
@@ -89,155 +95,85 @@ async def set_filters(driver: webdriver.Chrome):
 async def start_applying(driver: webdriver.Chrome):
     try:
         print("Starting to apply...")
-        count = 0
-        limit = 2
+
+        global count, limit, reason
         
-        try: companies: list[WebElement] = await driver.find_elements(By.XPATH, '//div[@data-test="StartupResult"]')
-        except NoSuchElementException as e:
-            print("No companies found")
-            raise e
-        
-        for company in companies:
-            if count > limit: 
-                print("Limit reached")
-                break
-
-            # scroll to company
-            await scroll_to(driver, company)
-
-            # hide button for the company -> bottom right
-            try: hide_button = await company.find_element(By.XPATH, './/button[text()="Hide"]')
-            except NoSuchElementException:
-                print('Hide button not found')
-                continue
+        while count < limit:
+            # companies = await load_companies(driver)
+            if len(companies) == 0:
+                print(f"No companies found")
+                return
             
-            try: 
-                company_name_dom: WebElement = await company.find_element(By.XPATH, './/h2[@class="inline text-md font-semibold"]')
-                company_name: str = await company_name_dom.text
+            for company in companies:
 
-                await driver.sleep(0.5)
-            except NoSuchElementException as e:
-                print(f"Company name not found")
-                continue
+                if count > limit:
+                    print("Limit reached")
+                    break
+                
+                reason = "applied"
 
+                # scroll to company
+                await scroll_to(driver, company)
 
-            # get jobs listed by the company
-            try: job_listings: list[WebElement] = await company.find_elements(By.XPATH, ".//div[@class='styles_component__Ey28k']")   
-            except NoSuchElementException as e:
-                print("Job listing element not found")
-                raise e
- 
-            if (len(job_listings) == 0):
-                print("Zero job listings found")
-                continue
-
-            for job in job_listings:
-                hide = False
-                position = "Position not found"
-                remote_policy = "Remote policy not found"
-                compensation = "Compensation not found"
-                # Check position
-                try: 
-                    position_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_title__xpQDw"]')
-                    position: str = await position_dom.text
-
-                    await driver.sleep(0.5)
-                except: print(position)
-            
-                # Check job location
-                try: 
-                    location_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_locations__HHbZs"]')
-                    remote_policy = get_proper_string(await location_dom.text)
-
-                    if "in office" in remote_policy:
-                        reason = f'{position} is not remote'
-                        print(reason)
-                        continue
-
-                    await driver.sleep(0.5)
-                except: print(remote_policy)
-
-                # Check compensation
-                try: 
-                    compensation_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_compensation__3JnvU"]')
-                    compensation: str = get_proper_string(await compensation_dom.text)
-                    # await driver.sleep(1)
-                except: print(compensation) 
-
-                print(company_name, position, remote_policy, compensation)
-            
-                await job.click()
-
-                await driver.sleep(5)
-                # wait for job modal to open
-                try: 
-                    modal: WebElement = await driver.find_element(By.XPATH, './/div[contains(@class, "ReactModal__Content")]')
-                    await driver.sleep(1)
-                except: 
-                    print("Modal not found")
+                # hide button for the company -> bottom right
+                try: hide_button: WebElement = await company.find_element(By.XPATH, './/button[text()="Hide"]')
+                except NoSuchElementException:
+                    print(f"Hide button not found") 
                     continue
                 
                 try: 
-                    close_button: WebElement = await driver.find_element(By.XPATH, '//button[@data-test="closeButton"]/*[1]')
-                    await driver.sleep(1)
-                except e: 
-                    print("Modal close button not found")
+                    company_name_dom: WebElement = await company.find_element(By.XPATH, './/h2[@class="inline text-md font-semibold"]')
+                    company_name: str = await company_name_dom.text
+
+                    await driver.sleep(0.5)
+                except NoSuchElementException as e:
+                    print(f"Company name not found")
                     continue
+
+                # get jobs listed by the company
+                try: job_listings: list[WebElement] = await company.find_elements(By.XPATH, ".//div[@class='styles_component__Ey28k']")   
+                except NoSuchElementException as e:
+                    print(f"Job listing element not found")
+                    raise e
+    
+                if (len(job_listings) == 0):
+                    reason = f"Zero job listings found"
+                    continue
+
+                # await process_jobs(driver, job_listings, company_name)
+
+                # hide company
+                await hide_button.click()
+
+                try: 
+                    hide_input: WebElement = await company.find_element(By.XPATH,'//input[@name="hideReason"]', timeout=10)
+                    hide_confirm: WebElement = await company.find_element(By.XPATH,'//span[@class="fill-current stroke-current w-3 leading-none"]', timeout=10)
+                except: 
+                    print(f"Hide button not found")
+                    continue
+
+                await hide_input.clear()
+                await driver.sleep(0.5)
 
                 try:
-                    try: 
-                        apply_button: WebElement = await modal.find_element(By.XPATH, '//div[@class="styles_component__AUM9C flex flex-row justify-end"]/*[1]')
-                        await driver.sleep(1)
-                    except: 
-                        print("Apply button not found")
-                        continue
+                    await hide_input.send_keys(reason)
+                    await driver.sleep(0.5)
+                except: print('Unable to fill in hide reason')
 
-                    if await apply_button.get_attribute('disabled'):
-                        reason = 'Either already applied or not accepting from your location'
-                        hide = True
-                        print(reason)
-                        continue
+                await hide_confirm.click()
+                await driver.sleep(1) 
 
-                    print("job is applicable")
-
-                    try: skills: WebElement = await modal.find_element(By.XPATH, './/div[@class="flex flex-col gap-2"]')
-                    except NoSuchElementException:
-                        print("Skills not found")
-                        skills = None
-
-                    if skills:
-                        await scroll_to(modal, skills)
-
-                        skillsText = get_proper_string(await skills.text)
-
-                        good_word = next((skill for skill in good_skills if skill.lower() in skillsText), False)
-                        if good_word: print(f'Found good skill {good_word}. Skipping bad word check.')
-                        else:
-                            bad_word = next((skill for skill in bad_skills if skill.lower() in skillsText), False)
-                            if bad_word:
-                                reason = f'Found bad skill {bad_word}. Skipping.'
-                                print(reason)
-                                continue
-
-                            strict_bad_word = next((skill for skill in strict_bad_skills if skill.lower() in skillsText), False)
-                            if strict_bad_word:
-                                reason = f'Found strict bad skill {strict_bad_word}. Skipping.'
-                                print(reason)
-                                continue
-                    # await apply_button.click()
-                    count =+ 1
-                except e: 
-                    print(e)
-                    continue
-                finally:
-                    await close_button.click()
-                    await driver.sleep(2)
-
-                    # if hide:
-                    #     print(reason)
-
+            try:
+                companies.clear()
+                await driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                await driver.sleep(3)
+                return await start_applying(driver)
+            except WebDriverException as e: 
+                print(f"Error during more load_companies")
+                raise e
+        
     except WebDriverException as e:
-        print(f"Error during start_applying {e}")
+        print(f"Error during start_applying")
         raise e
 
 
@@ -255,8 +191,6 @@ async def main():
         try:
             await driver.maximize_window()
             await driver.sleep(1)
-
-            # await driver.title
 
             await driver.get('https://wellfound.com/login', wait_load=True)
             await driver.sleep(2)
