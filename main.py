@@ -92,6 +92,14 @@ async def set_filters(driver: webdriver.Chrome):
         print(f"Error during setting filters: {e}")
         raise e
 
+
+async def load_companies(driver: webdriver.Chrome):
+    try: companies: list[WebElement] = await driver.find_elements(By.XPATH, '//div[@data-test="StartupResult"]')
+    except NoSuchElementException as e:
+        print("No companies found")
+        return []
+    return companies
+
 async def start_applying(driver: webdriver.Chrome):
     try:
         print("Starting to apply...")
@@ -99,7 +107,7 @@ async def start_applying(driver: webdriver.Chrome):
         global count, limit, reason
         
         while count < limit:
-            # companies = await load_companies(driver)
+            companies = await load_companies(driver)
             if len(companies) == 0:
                 print(f"No companies found")
                 return
