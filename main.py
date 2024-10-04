@@ -92,13 +92,155 @@ async def set_filters(driver: webdriver.Chrome):
         print(f"Error during setting filters: {e}")
         raise e
 
-
 async def load_companies(driver: webdriver.Chrome):
     try: companies: list[WebElement] = await driver.find_elements(By.XPATH, '//div[@data-test="StartupResult"]')
     except NoSuchElementException as e:
         print("No companies found")
         return []
     return companies
+
+async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement], company_name: str):
+    try:
+        global count, reason
+        for job in job_listings:
+            position = "Position not found"
+            remote_policy = "Remote policy not found"
+            compensation = "Compensation not found"
+
+            # Check position
+            try: 
+                position_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_title__xpQDw"]')
+                position: str = await position_dom.text
+
+                await driver.sleep(0.5)
+            except: 
+                reason = f"{position}"
+                continue
+        
+            # Check job location
+            try: 
+                location_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_locations__HHbZs"]')
+                remote_policy = get_proper_string(await location_dom.text)
+
+                if "in office" in remote_policy:
+                    reason = f'{position} is not remote'
+                    continue
+
+                await driver.sleep(0.5)
+            except:                     
+                reason = f"{remote_policy}"
+                continue
+
+            # Check compensation
+            try: 
+                compensation_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_compensation__3JnvU"]')
+                compensation: str = get_proper_string(await compensation_dom.text)
+                # await driver.sleep(1)
+            except:                     
+                reason = f"{compensation}"
+                continue
+        
+            await job.click()
+            # await driver.sleep(3)
+            # wait for job modal to open
+            try: 
+                modal: WebElement = await driver.find_element(By.XPATH, './/div[contains(@class, "ReactModal__Content")]', timeout=15)
+                await driver.sleep(1)
+            except: 
+                print("Modal not found")
+                continue
+
+            try: 
+                close_button: WebElement = await driver.find_element(By.XPATH, '//button[@data-test="closeButton"]/*[1]')
+                await driver.sleep(1)
+            except: 
+                print("Modal close button not found")
+                continue
+            
+
+            try:
+                try: 
+                    apply_button: WebElement = await modal.find_element(By.XPATH, '//div[@class="styles_component__AUM9C flex flex-row justify-end"]/*[1]')
+                    await driver.sleep(1)
+                except: 
+                    print("Apply button not found")
+                    continue
+
+                if await apply_button.get_attribute('disabled'):
+                    reason = f"Either already applied or not accepting from location"
+                    continue
+
+                try: skills: WebElement = await modal.find_element(By.XPATH, './/div[@class="flex flex-col gap-2"]')
+                except:
+                    print("Skills not found")
+                    skills = None
+
+                if skills:
+                    await scroll_to(modal, skills)
+
+                    skillsText = get_proper_string(await skills.text)
+
+                    good_word = next((skill for skill in good_skills if skill.lower() in skillsText), False)
+                    if not good_word:
+                        bad_word = next((skill for skill in bad_skills if skill.lower() in skillsText), False)
+                        if bad_word:
+                            reason = f'Found bad skill {bad_word}. Skipping.'
+                            continue
+
+
+                    strict_bad_word = next((skill for skill in strict_bad_skills if skill.lower() in skillsText), False)
+                    if strict_bad_word:
+                        reason = f'Found strict bad skill {strict_bad_word}. Skipping.'
+                        continue
+                # check for required experience & bad words
+                try: description_dom: WebElement = await modal.find_element(By.XPATH, '//div[@class="styles_component__WZ_oK"]')
+                except: 
+                    print("Description not found")
+                    continue
+
+                await scroll_to(modal, description_dom)
+
+                description = get_proper_string(await description_dom.text)
+
+                required_experience = re.compile(r'(?:\(\s*(\d+)\s*\)|(\d+))?\s*[-to]*\s*(\d+)?\+?\s*(year|yr)s?', re.IGNORECASE)
+                match = required_experience.search(description)
+
+                if match:
+                    lower_limit = int(match.group(1) or match.group(2) or 0)
+                    upper_limit = int(match.group(3)) if match.group(3) else current_experience
+
+                    if not lower_limit <= current_experience <= upper_limit:
+                        reason = f"Not enough experience"
+                        continue
+                
+                skip = False
+                for word in bad_words:
+                    if word.lower() in description:
+                        reason = f"Skipped job due to bad word {word} found in description"
+                        skip = True
+                        break
+                if skip: continue
+                
+                try: 
+                    text_area: WebElement = await modal.find_element(By.XPATH, '//textarea[contains(@id, "form-input")]')
+                    await text_area.clear()
+                    await text_area.send_keys(f"Hello! I'd like to apply for the {position} role at {company_name}.")
+                except: print("Text area not found")
+
+                await apply_button.click()
+                count += 1
+            except WebDriverException as e: 
+                print(e)
+                continue
+            finally:
+                if await close_button.is_displayed():
+                    await close_button.click()
+                    await driver.sleep(1)
+                else: return
+                
+    except WebDriverException as e:
+        print("error in process_jobs")
+        raise e
 
 async def start_applying(driver: webdriver.Chrome):
     try:
