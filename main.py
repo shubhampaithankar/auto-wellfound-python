@@ -10,14 +10,14 @@ from selenium.common.exceptions import NoSuchElementException, WebDriverExceptio
 
 from modules.helper import *
 
+from config.settings import *
 from config.search import *
 from config.secrets import *
-
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 count = 0
-limit = 15
+limit = 5
 reason = ""
 
 #todo: add job to the following lists based on action, store in mysql db
@@ -53,6 +53,10 @@ async def login(driver: webdriver.Chrome, retries=3):
         
         await submit_button.click()
         await driver.sleep(5)
+
+        # if await detect_captcha(driver):
+        #     print("CAPTCHA detected, waiting for next instance of the browser...")
+        #     return
 
         # wait till redirect to jobs page
         if await driver.current_url != 'https://wellfound.com/jobs':
@@ -116,9 +120,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 company_name: company_name,
                 position: position,
                 remote_policy: remote_policy,
-                compensation: compensation,
-                skills: '',
-                description: ''
+                compensation: compensation
             }
 
             # Check position
@@ -138,7 +140,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 remote_policy = get_proper_string(await location_dom.text)
                 job_obj['remote_policy'] = remote_policy
 
-                if "in office" in remote_policy:
+                if "in office" in remote_policy.lower():
                     reason = f'{position} is not remote'
                     continue
 
@@ -198,15 +200,17 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                     skillsText = get_proper_string(await skills.text)
                     job_obj['skills'] = skillsText
 
-                    good_word = next((skill for skill in good_skills if skill.lower() in skillsText), False)
+                    skills_low = skillsText.lower()
+
+                    good_word = next((skill for skill in good_skills if skill.lower() in skills_low), False)
                     if not good_word:
-                        bad_word = next((skill for skill in bad_skills if skill.lower() in skillsText), False)
+                        bad_word = next((skill for skill in bad_skills if skill.lower() in skills_low), False)
                         if bad_word:
                             reason = f'Found bad skill {bad_word}. Skipping.'
                             continue
 
 
-                    strict_bad_word = next((skill for skill in strict_bad_skills if skill.lower() in skillsText), False)
+                    strict_bad_word = next((skill for skill in strict_bad_skills if skill.lower() in skills_low), False)
                     if strict_bad_word:
                         reason = f'Found strict bad skill {strict_bad_word}. Skipping.'
                         continue
@@ -221,8 +225,10 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 description = get_proper_string(await description_dom.text)
                 job_obj['description'] = description
 
+                desc_low = description.lower()
+
                 required_experience = re.compile(r'(?:\(\s*(\d+)\s*\)|(\d+))?\s*[-to]*\s*(\d+)?\+?\s*(year|yr)s?', re.IGNORECASE)
-                match = required_experience.search(description)
+                match = required_experience.search(desc_low)
 
                 if match:
                     lower_limit = int(match.group(1) or match.group(2) or 0)
@@ -234,7 +240,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 
                 skip = False
                 for word in bad_words:
-                    if word.lower() in description:
+                    if word.lower() in desc_low:
                         reason = f"Skipped job due to bad word {word} found in description"
                         skip = True
                         break
@@ -343,6 +349,14 @@ async def start_applying(driver: webdriver.Chrome):
             except WebDriverException as e: 
                 print(f"Error during more load_companies")
                 raise e
+            
+        print("Finished applying")
+        print("---------------------------------------")
+        print(f"Applied: {len(applied)}")
+        print(f"Rejected: {len(rejected)}")
+        print("---------------------------------------")
+
+        return
         
     except WebDriverException as e:
         print(f"Error during start_applying")
@@ -358,15 +372,20 @@ async def store_jobs():
     except Exception as e:
         raise e
 
+async def send_email():
+    try: return
+    except Exception as e:
+        raise e
+
 async def main():
     options = webdriver.ChromeOptions()
-    # options.add_argument("--incognito")
-
-    headless = False
 
     if not headless:
         dark_reader = 'extension/dark-reader.zip'
         options.add_extension(dark_reader)
+    else:
+        options.add_argument("--headless")
+        options.add_argument("--incognito")
 
     async with webdriver.Chrome(options=options) as driver:
         try:
@@ -376,6 +395,9 @@ async def main():
             await driver.get('https://wellfound.com/login', wait_load=True)
             await driver.sleep(2)
 
+            # if await detect_captcha(driver):
+            #     print("CAPTCHA detected, waiting for next instance of the browser...")
+            #     return
 
             await login(driver)
 
@@ -386,6 +408,10 @@ async def main():
             await set_filters(driver)
 
             await start_applying(driver)
+
+            if store_in_db: await store_jobs()
+
+            if email: await send_email()
         except WebDriverException as e:
             print(f"Error during main: {e}")
         finally:
