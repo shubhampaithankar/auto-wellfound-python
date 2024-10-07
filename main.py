@@ -54,9 +54,11 @@ async def login(driver: webdriver.Chrome, retries=3):
         await submit_button.click()
         await driver.sleep(5)
 
-        # if await detect_captcha(driver):
-        #     print("CAPTCHA detected, waiting for next instance of the browser...")
-        #     return
+        captcha = await detect_captcha(driver)
+        print(f"CAPTCHA detected in login: {captcha}")
+        if captcha:
+            print("CAPTCHA detected, waiting for next instance of the browser...")
+            return
 
         # wait till redirect to jobs page
         if await driver.current_url != 'https://wellfound.com/jobs':
@@ -395,26 +397,29 @@ async def main():
             await driver.get('https://wellfound.com/login', wait_load=True)
             await driver.sleep(2)
 
-            # if await detect_captcha(driver):
-            #     print("CAPTCHA detected, waiting for next instance of the browser...")
-            #     return
+            captcha = await detect_captcha(driver)
+            print(f"CAPTCHA detected in main: {captcha}")
+            if captcha:
+                print("CAPTCHA detected, waiting for next instance of the browser...")
+                return
 
             await login(driver)
+            await driver.sleep(2)
 
-            if await driver.current_url != 'https://wellfound.com/jobs':
-                await driver.get('https://wellfound.com/jobs', wait_load=True)
-            await driver.sleep(1)
+            # if await driver.current_url != 'https://wellfound.com/jobs':
+            #     await driver.get('https://wellfound.com/jobs', wait_load=True)
+            # await driver.sleep(1)
 
-            await set_filters(driver)
+            # await set_filters(driver)
 
-            await start_applying(driver)
+            # await start_applying(driver)
 
             if store_in_db: await store_jobs()
 
             if email: await send_email()
         except WebDriverException as e:
             print(f"Error during main: {e}")
-        finally:
-            await driver.close()
+        # finally:
+            # await driver.close()
 
 asyncio.run(main())
