@@ -5,7 +5,7 @@ from aiomysql.cursors import Cursor
 
 DB_NAME = "wellfound"
 
-async def get_mysql_connection(host: str, port: int, user: str, password: str):
+async def get_mysql_connection(host: str, port: int, user: str, password: str) -> Cursor:
   try:
     pool: Pool = await aiomysql.create_pool(host=host, port=port, user=user, password=password)
     print(f"Connected to MySQL successfully")

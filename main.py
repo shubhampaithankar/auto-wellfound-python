@@ -6,9 +6,12 @@ import re
 from selenium_driverless import webdriver
 from selenium_driverless.types.webelement import WebElement
 from selenium_driverless.types.by import By
-from selenium.common.exceptions import NoSuchElementException, WebDriverException, ElementNotVisibleException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException
+
+from aiomysql.cursors import Cursor
 
 from modules.helper import *
+from modules.mysql import *
 
 from config.settings import *
 from config.search import *
@@ -20,7 +23,6 @@ count = 0
 limit = 5
 reason = ""
 
-#todo: add job to the following lists based on action, store in mysql db
 applied = []
 rejected = []
 
@@ -116,13 +118,15 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
             position = "Position not found"
             remote_policy = "Remote policy not found"
             compensation = "Compensation not found"
+            time = format_timestamp()
 
             # job object to store
             job_obj = {
                 company_name: company_name,
                 position: position,
                 remote_policy: remote_policy,
-                compensation: compensation
+                compensation: compensation,
+                time: time
             }
 
             # Check position
@@ -366,12 +370,92 @@ async def start_applying(driver: webdriver.Chrome):
 
 async def store_jobs():
     try:
-        if len(applied) > 0:
+        # Create MySQL connection
+        db: Cursor = await get_mysql_connection(host=mysql_host, port=3306, user=mysql_user, password=mysql_password)
+        if not db: 
+            print("Failed to establish database connection.")
             return
-        
-        if len(rejected) > 0:
-            return
+
+        # Initialize counters
+        applied_count = 0
+        rejected_count = 0
+
+        global applied, rejected
+
+        try:
+            # Check if database exists and use it
+            await db.execute(f"CREATE DATABASE IF NOT EXISTS {mysql_database}")
+            await db.execute(f"USE {mysql_database}")
+
+            # Check if table exists before creating it
+            result = await db.execute(f"SHOW TABLES LIKE 'job_applications'")
+
+            if not result:
+                await db.execute("""
+                    CREATE TABLE job_applications (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        company_name VARCHAR(255) NOT NULL,
+                        position VARCHAR(255) NOT NULL,
+                        remote_policy VARCHAR(255),
+                        compensation VARCHAR(255),
+                        skills TEXT,
+                        description TEXT,
+                        status ENUM('applied', 'rejected') NOT NULL,
+                        reason TEXT,
+                        source TEXT,
+                        time TEXT
+                    )
+                """)
+
+            # Prepare query for inserting jobs
+            query = """
+                INSERT INTO job_applications 
+                (company_name, position, remote_policy, compensation, skills, description, status, reason, source, time) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            # Store applied jobs
+            for job in applied:
+                data = (
+                    job.get('company_name', 'Unknown Company'),  # Use fallback value
+                    job.get('position', 'Unknown Position'),     # Use fallback value
+                    job.get('remote_policy', None),
+                    job.get('compensation', None),
+                    job.get('skills', None),
+                    job.get('description', None),
+                    'applied',  # status
+                    None,  # reason is null for applied jobs
+                    'wellfound', # source is always wellfound
+                    job.get('time'),  # assume job['time'] is in correct TIMESTAMP format
+                )
+                await db.execute(query, data)
+                applied_count += 1
+
+            # Store rejected jobs
+            for job in rejected:
+                data = (
+                    job.get('company_name', 'Unknown Company'),  # Use fallback value
+                    job.get('position', 'Unknown Position'),     # Use fallback value
+                    job.get('remote_policy', None),
+                    job.get('compensation', None),
+                    job.get('skills', None),
+                    job.get('description', None),
+                    'rejected',  # status
+                    job.get('reason', None),  # reason for rejection
+                    'wellfound', # source is always wellfound
+                    job.get('time'),  # assume job['time'] is in correct TIMESTAMP format
+                )
+                await db.execute(query, data)
+                rejected_count += 1
+
+            print(f"Stored {applied_count} applied jobs and {rejected_count} rejected jobs in the database.")
+
+        finally:
+            # Close the database connection
+            await db.close()
+
     except Exception as e:
+        print(f"Error storing jobs in the database: {e}")
         raise e
 
 async def send_email():
@@ -389,37 +473,37 @@ async def main():
         options.add_argument("--headless")
         options.add_argument("--incognito")
 
-    async with webdriver.Chrome(options=options) as driver:
-        try:
-            await driver.maximize_window()
-            await driver.sleep(1)
+    try:
+        driver = await webdriver.Chrome(options=options)
+        await driver.maximize_window()
+        await driver.sleep(1)
 
-            await driver.get('https://wellfound.com/login', wait_load=True)
-            await driver.sleep(2)
+        await driver.get('https://wellfound.com/login', wait_load=True)
+        await driver.sleep(2)
 
-            captcha = await detect_captcha(driver)
-            print(f"CAPTCHA detected in main: {captcha}")
-            if captcha:
-                print("CAPTCHA detected, waiting for next instance of the browser...")
-                return
+        captcha = await detect_captcha(driver)
+        print(f"CAPTCHA detected in main: {captcha}")
+        if captcha:
+            print("CAPTCHA detected, waiting for next instance of the browser...")
+            return
 
-            await login(driver)
-            await driver.sleep(2)
+        await login(driver)
+        await driver.sleep(2)
 
-            # if await driver.current_url != 'https://wellfound.com/jobs':
-            #     await driver.get('https://wellfound.com/jobs', wait_load=True)
-            # await driver.sleep(1)
+        if await driver.current_url != 'https://wellfound.com/jobs':
+            await driver.get('https://wellfound.com/jobs', wait_load=True)
+        await driver.sleep(1)
 
-            # await set_filters(driver)
+        await set_filters(driver)
 
-            # await start_applying(driver)
+        await start_applying(driver)
 
-            if store_in_db: await store_jobs()
+        if store_in_db: await store_jobs()
 
-            if email: await send_email()
-        except WebDriverException as e:
-            print(f"Error during main: {e}")
-        # finally:
-            # await driver.close()
+        if email: await send_email()
+    except WebDriverException as e:
+        print(f"Error during main: {e}")
+    finally:
+        await driver.close()
 
 asyncio.run(main())
