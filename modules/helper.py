@@ -2,6 +2,7 @@ from selenium_driverless import webdriver
 from selenium_driverless.types.by import By
 from selenium_driverless.types.webelement import WebElement
 from selenium.common.exceptions import ElementNotVisibleException, WebDriverException, NoSuchElementException
+from datetime import datetime
 
 def get_proper_string(value: str) -> str: 
     """Returns a string stripped and which maintains its idents and breaks"""
@@ -33,4 +34,8 @@ async def detect_captcha(driver: webdriver.Chrome):
 
         # await wait_for_disappearance(driver, captcha_element, timeout=5)
     except: return False
-    
+ 
+
+def format_timestamp():
+    # Format timestamp as dd-mm-yy:hh:mm:ss
+    return datetime.now().strftime(f"%d-%m-%y:%H:%M:%S")  
