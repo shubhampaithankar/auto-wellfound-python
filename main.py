@@ -220,8 +220,9 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                     if strict_bad_word:
                         reason = f'Found strict bad skill {strict_bad_word}. Skipping.'
                         continue
+                
                 # check for required experience & bad words
-                try: description_dom: WebElement = await modal.find_element(By.XPATH, '//div[@class="styles_component__WZ_oK"]')
+                try: description_dom: WebElement = await modal.find_element(By.XPATH, '//div[@id="job-description"]')
                 except: 
                     print("Description not found")
                     continue
@@ -276,6 +277,31 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
         print("error in process_jobs")
         raise e
 
+async def hide_company(driver: webdriver.Chrome, hide_button: WebElement, company: WebElement):
+    try:
+        global reason
+        await hide_button.click()
+        try: 
+            hide_input: WebElement = await company.find_element(By.XPATH,'//input[@name="hideReason"]', timeout=10)
+            hide_confirm: WebElement = await company.find_element(By.XPATH,'//span[@class="fill-current stroke-current w-3 leading-none"]', timeout=10)
+        except: 
+            print(f"Hide button not found")
+            return False
+
+        await hide_input.clear()
+        await driver.sleep(0.5)
+
+        try:
+            await hide_input.send_keys(reason)
+            await driver.sleep(0.5)
+        except: print('Unable to fill in hide reason')
+
+        await hide_confirm.click()
+        await driver.sleep(1)
+        
+        return True
+    except: print('Unable to hide company')
+
 async def start_applying(driver: webdriver.Chrome):
     try:
         print("Starting to apply...")
@@ -327,25 +353,8 @@ async def start_applying(driver: webdriver.Chrome):
                 await process_jobs(driver, job_listings, company_name)
 
                 # hide company
-                await hide_button.click()
-
-                try: 
-                    hide_input: WebElement = await company.find_element(By.XPATH,'//input[@name="hideReason"]', timeout=10)
-                    hide_confirm: WebElement = await company.find_element(By.XPATH,'//span[@class="fill-current stroke-current w-3 leading-none"]', timeout=10)
-                except: 
-                    print(f"Hide button not found")
-                    continue
-
-                await hide_input.clear()
-                await driver.sleep(0.5)
-
-                try:
-                    await hide_input.send_keys(reason)
-                    await driver.sleep(0.5)
-                except: print('Unable to fill in hide reason')
-
-                await hide_confirm.click()
-                await driver.sleep(1) 
+                if (hide_companies):
+                    await hide_company(driver, hide_button, company)
 
             try:
                 companies.clear()
