@@ -8,6 +8,8 @@ from selenium_driverless.types.webelement import WebElement
 from selenium_driverless.types.by import By
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
+from dotenv import load_dotenv
+
 from aiomysql.cursors import Cursor
 
 from modules.helper import *
@@ -16,6 +18,8 @@ from modules.mysql import *
 from config.settings import *
 from config.search import *
 from config.secrets import *
+
+load_dotenv()
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
