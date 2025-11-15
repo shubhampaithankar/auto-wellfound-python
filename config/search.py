@@ -34,6 +34,8 @@ bad_skills = [
     "laravel",
     "django",
     "cybersecurity"
+    'pentesting'
+    'ethical hacking'
 ]
 
 strict_bad_skills = [
