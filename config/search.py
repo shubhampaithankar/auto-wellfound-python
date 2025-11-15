@@ -32,7 +32,8 @@ bad_skills = [
     "salesforce",
     "crm",
     "laravel",
-    "django"
+    "django",
+    "cybersecurity"
 ]
 
 strict_bad_skills = [
