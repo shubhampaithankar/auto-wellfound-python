@@ -151,6 +151,11 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 await driver.sleep(0.5)
             except: 
                 reason = f"{position}"
+                job_obj['notes'] = reason
+                # Store early rejection
+                if store_in_db:
+                    await store_single_job(job_obj, 'rejected')
+                rejected.append(job_obj)
                 continue
         
             # Check job location
@@ -162,11 +167,21 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
 
                 if "in office" in remote_policy.lower():
                     reason = f'{position} is not remote'
+                    job_obj['notes'] = reason
+                    # Store early rejection
+                    if store_in_db:
+                        await store_single_job(job_obj, 'rejected')
+                    rejected.append(job_obj)
                     continue
 
                 await driver.sleep(0.5)
             except:                     
                 reason = f"{remote_policy}"
+                job_obj['notes'] = reason
+                # Store early rejection
+                if store_in_db:
+                    await store_single_job(job_obj, 'rejected')
+                rejected.append(job_obj)
                 continue
 
             # Check compensation
@@ -177,6 +192,11 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 # await driver.sleep(1)
             except:                     
                 reason = f"{compensation}"
+                job_obj['notes'] = reason
+                # Store early rejection
+                if store_in_db:
+                    await store_single_job(job_obj, 'rejected')
+                rejected.append(job_obj)
                 continue
         
             await job.click()
@@ -198,7 +218,11 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
             
             try:
                 try: 
-                    apply_button: WebElement = await modal.find_element(By.XPATH, '//button[@data-test="JobDescriptionSlideIn--SubmitButton"]/*[1]')
+                    # Try to find the apply button within the modal first, then fallback to driver
+                    try:
+                        apply_button: WebElement = await modal.find_element(By.XPATH, './/button[@data-test="JobDescriptionSlideIn--SubmitButton"]')
+                    except:
+                        apply_button: WebElement = await driver.find_element(By.XPATH, '//button[@data-test="JobDescriptionSlideIn--SubmitButton"]')
                     await driver.sleep(1)
                 except: 
                     print("Apply button not found")
@@ -206,10 +230,16 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
 
                 if await apply_button.get_attribute('disabled'):
                     reason = f"Either already applied or not accepting from location"
+                    job_obj['notes'] = reason
+                    # Store rejection
+                    if store_in_db:
+                        await store_single_job(job_obj, 'rejected')
+                    rejected.append(job_obj)
                     continue
 
                 try: 
-                    skills: WebElement = await modal.find_element(By.XPATH, './/span[text()="Skills"]/following-sibling::div[1]')
+                    # Find the Skills section - the div with class "flex flex-wrap" that contains skill tags
+                    skills: WebElement = await modal.find_element(By.XPATH, './/span[text()="Skills"]/following-sibling::div[@class="flex flex-wrap"]')
                 except:
                     print("Skills not found")
                     skills = None
@@ -227,12 +257,22 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                         bad_word = next((skill for skill in bad_skills if skill.lower() in skills_low), False)
                         if bad_word:
                             reason = f'Found bad skill {bad_word}. Skipping.'
+                            job_obj['notes'] = reason
+                            # Store rejection
+                            if store_in_db:
+                                await store_single_job(job_obj, 'rejected')
+                            rejected.append(job_obj)
                             continue
 
 
                     strict_bad_word = next((skill for skill in strict_bad_skills if skill.lower() in skills_low), False)
                     if strict_bad_word:
                         reason = f'Found strict bad skill {strict_bad_word}. Skipping.'
+                        job_obj['notes'] = reason
+                        # Store rejection
+                        if store_in_db:
+                            await store_single_job(job_obj, 'rejected')
+                        rejected.append(job_obj)
                         continue
                 
                 # check for required experience & bad words
@@ -259,6 +299,11 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
 
                     if not lower_limit <= current_experience <= upper_limit:
                         reason = f"Not enough experience"
+                        job_obj['notes'] = reason
+                        # Store rejection
+                        if store_in_db:
+                            await store_single_job(job_obj, 'rejected')
+                        rejected.append(job_obj)
                         continue
                 else:
                     job_obj['exp_required'] = None
@@ -267,6 +312,11 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 for word in bad_words:
                     if word.lower() in desc_low:
                         reason = f"Skipped job due to bad word {word} found in description"
+                        job_obj['notes'] = reason
+                        # Store rejection
+                        if store_in_db:
+                            await store_single_job(job_obj, 'rejected')
+                        rejected.append(job_obj)
                         skip = True
                         break
                 if skip: continue
@@ -299,11 +349,29 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 job_obj['application_date'] = format_timestamp()
 
                 await apply_button.click()
+                
+                # Store job immediately in database
+                if store_in_db:
+                    success = await store_single_job(job_obj, 'applied')
+                    if success:
+                        print(f"✓ Stored applied job: {position} at {company_name}")
+                    else:
+                        print(f"✗ Failed to store applied job: {position} at {company_name}")
+                
                 applied.append(job_obj)
                 count += 1
             except WebDriverException as e:
                 print(e)
                 job_obj['notes'] = reason
+                
+                # Store rejected job immediately in database
+                if store_in_db:
+                    success = await store_single_job(job_obj, 'rejected')
+                    if success:
+                        print(f"✓ Stored rejected job: {job_obj.get('position', 'Unknown')} at {company_name} - {reason}")
+                    else:
+                        print(f"✗ Failed to store rejected job: {job_obj.get('position', 'Unknown')} at {company_name}")
+                
                 rejected.append(job_obj)
                 continue
             finally:
@@ -519,6 +587,14 @@ async def main():
         options.add_argument("--headless")
         options.add_argument("--incognito")
 
+    # Initialize database connection if storing in DB
+    if store_in_db:
+        conn = await get_sqlite_connection()
+        if conn:
+            await init_database(conn)
+        else:
+            print("Warning: Failed to initialize database. Jobs will not be stored.")
+
     driver = None
     try:
         driver = await webdriver.Chrome(options=options)
@@ -545,7 +621,8 @@ async def main():
 
         await start_applying(driver)
 
-        if store_in_db: await store_jobs()
+        # Jobs are now stored immediately as they're processed, so no need to call store_jobs()
+        # The applied and rejected lists are kept for summary reporting
 
         if send_email: await send_email_report()
     except (WebDriverException, FileNotFoundError) as e:
@@ -557,5 +634,8 @@ async def main():
     finally:
         if driver is not None:
             await driver.close()
+        # Close database connection
+        if store_in_db:
+            await close_connection()
 
 asyncio.run(main())
