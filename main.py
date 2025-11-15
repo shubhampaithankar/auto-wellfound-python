@@ -67,6 +67,11 @@ async def login(driver: webdriver.Chrome, retries=3):
             print("CAPTCHA detected, waiting for next instance of the browser...")
             return
 
+        try: await driver.get('https://wellfound.com/jobs', wait_load=True)
+        except WebDriverException as e:
+            print(f"Error during redirect to jobs page: {e}")
+            raise e
+
         # wait till redirect to jobs page
         if await driver.current_url != 'https://wellfound.com/jobs':
             if retries > 0:
@@ -273,7 +278,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 rejected.append(job_obj)
                 continue
             finally:
-                if await close_button.is_displayed():
+                if await close_button.is_visible():
                     await close_button.click()
                     await driver.sleep(1)
                 else: return
@@ -472,7 +477,7 @@ async def store_jobs():
         print(f"Error storing jobs in the database: {e}")
         raise e
 
-async def send_email():
+async def send_email_report():
     try: return
     except Exception as e:
         raise e
@@ -524,7 +529,7 @@ async def main():
 
         if store_in_db: await store_jobs()
 
-        if email: await send_email()
+        if send_email: await send_email_report()
     except (WebDriverException, FileNotFoundError) as e:
         print(f"Error during main: {e}")
         if isinstance(e, FileNotFoundError) and "Chrome" in str(e):

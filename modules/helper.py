@@ -10,7 +10,7 @@ def get_proper_string(value: str) -> str:
 
 async def wait_for_disappearance(driver: webdriver.Chrome, element: WebElement, timeout=3): 
     """Wait till the element is no longer displayed"""
-    if await element.is_displayed():
+    if await element.is_visible():
         try: 
             await driver.sleep(timeout)
             await wait_for_disappearance(driver, element)
