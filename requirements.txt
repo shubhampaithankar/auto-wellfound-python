@@ -1,5 +1,5 @@
 selenium-driverless
 selenium
 python-dotenv
-aiomysql
+aiosqlite
 

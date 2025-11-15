@@ -11,10 +11,8 @@ from selenium.common.exceptions import NoSuchElementException, WebDriverExceptio
 
 from dotenv import load_dotenv
 
-from aiomysql.cursors import Cursor
-
 from modules.helper import *
-from modules.mysql import *
+from modules.db import *
 
 from config.settings import *
 from config.search import *
@@ -132,11 +130,16 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
 
             # job object to store
             job_obj = {
-                company_name: company_name,
-                position: position,
-                remote_policy: remote_policy,
-                compensation: compensation,
-                time: time
+                'company_name': company_name,
+                'position': position,
+                'remote_policy': remote_policy,
+                'compensation': compensation,
+                'time': time,
+                'url': None,
+                'type': None,
+                'location': None,
+                'exp_required': None,
+                'application_date': None
             }
 
             # Check position
@@ -155,6 +158,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 location_dom: WebElement = await job.find_element(By.XPATH, './/span[@class="styles_locations__HHbZs"]')
                 remote_policy = get_proper_string(await location_dom.text)
                 job_obj['remote_policy'] = remote_policy
+                job_obj['location'] = remote_policy  # Store location as well
 
                 if "in office" in remote_policy.lower():
                     reason = f'{position} is not remote'
@@ -250,10 +254,14 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 if match:
                     lower_limit = int(match.group(1) or match.group(2) or 0)
                     upper_limit = int(match.group(3)) if match.group(3) else current_experience
+                    exp_text = f"{lower_limit}-{upper_limit} years" if match.group(3) else f"{lower_limit}+ years"
+                    job_obj['exp_required'] = exp_text
 
                     if not lower_limit <= current_experience <= upper_limit:
                         reason = f"Not enough experience"
                         continue
+                else:
+                    job_obj['exp_required'] = None
                 
                 skip = False
                 for word in bad_words:
@@ -263,18 +271,39 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                         break
                 if skip: continue
                 
+                # Get job URL from current page
+                try:
+                    job_url = await driver.current_url
+                    job_obj['url'] = job_url
+                except:
+                    job_obj['url'] = None
+
+                # Try to get job type (Full-time, Part-time, etc.)
+                try:
+                    # Look for job type in the modal
+                    type_elements = await modal.find_elements(By.XPATH, './/span[contains(text(), "Full-time") or contains(text(), "Part-time") or contains(text(), "Contract") or contains(text(), "Internship")]')
+                    if type_elements:
+                        job_obj['type'] = await type_elements[0].text
+                    else:
+                        job_obj['type'] = None
+                except:
+                    job_obj['type'] = None
+
                 try: 
                     text_area: WebElement = await modal.find_element(By.XPATH, '//textarea[contains(@id, "form-input")]')
                     await text_area.clear()
                     await text_area.send_keys(f"Hello! I'd like to apply for the {position} role at {company_name}.")
                 except: print("Text area not found")
 
+                # Set application date when actually applying
+                job_obj['application_date'] = format_timestamp()
+
                 await apply_button.click()
                 applied.append(job_obj)
                 count += 1
             except WebDriverException as e:
                 print(e)
-                job_obj['reason'] = reason
+                job_obj['notes'] = reason
                 rejected.append(job_obj)
                 continue
             finally:
@@ -389,9 +418,9 @@ async def start_applying(driver: webdriver.Chrome):
 
 async def store_jobs():
     try:
-        # Create MySQL connection
-        db: Cursor = await get_mysql_connection(host=mysql_host, port=3306, user=mysql_user, password=mysql_password)
-        if not db: 
+        # Create SQLite connection
+        conn = await get_sqlite_connection()
+        if not conn: 
             print("Failed to establish database connection.")
             return
 
@@ -402,35 +431,14 @@ async def store_jobs():
         global applied, rejected
 
         try:
-            # Check if database exists and use it
-            await db.execute(f"CREATE DATABASE IF NOT EXISTS {mysql_database}")
-            await db.execute(f"USE {mysql_database}")
+            # Initialize database table
+            await init_database(conn)
 
-            # Check if table exists before creating it
-            result = await db.execute(f"SHOW TABLES LIKE 'job_applications'")
-
-            if not result:
-                await db.execute("""
-                    CREATE TABLE job_applications (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        company_name VARCHAR(255) NOT NULL,
-                        position VARCHAR(255) NOT NULL,
-                        remote_policy VARCHAR(255),
-                        compensation VARCHAR(255),
-                        skills TEXT,
-                        description TEXT,
-                        status ENUM('applied', 'rejected') NOT NULL,
-                        reason TEXT,
-                        source TEXT,
-                        time TEXT
-                    )
-                """)
-
-            # Prepare query for inserting jobs
+            # Prepare query for inserting jobs (SQLite uses ? placeholders)
             query = """
                 INSERT INTO job_applications 
-                (company_name, position, remote_policy, compensation, skills, description, status, reason, source, time) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (company_name, position, remote_policy, compensation, skills, description, status, notes, url, type, location, exp_required, application_date, time) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
             # Store applied jobs
@@ -443,11 +451,15 @@ async def store_jobs():
                     job.get('skills', None),
                     job.get('description', None),
                     'applied',  # status
-                    None,  # reason is null for applied jobs
-                    'wellfound', # source is always wellfound
-                    job.get('time'),  # assume job['time'] is in correct TIMESTAMP format
+                    None,  # notes is null for applied jobs
+                    job.get('url', None),
+                    job.get('type', None),
+                    job.get('location', None),
+                    job.get('exp_required', None),
+                    job.get('application_date', None),
+                    job.get('time'),  # timestamp when job was processed
                 )
-                await db.execute(query, data)
+                await conn.execute(query, data)
                 applied_count += 1
 
             # Store rejected jobs
@@ -460,18 +472,24 @@ async def store_jobs():
                     job.get('skills', None),
                     job.get('description', None),
                     'rejected',  # status
-                    job.get('reason', None),  # reason for rejection
-                    'wellfound', # source is always wellfound
-                    job.get('time'),  # assume job['time'] is in correct TIMESTAMP format
+                    job.get('notes', None),  # notes for rejection reason
+                    job.get('url', None),
+                    job.get('type', None),
+                    job.get('location', None),
+                    job.get('exp_required', None),
+                    job.get('application_date', None),  # null for rejected jobs
+                    job.get('time'),  # timestamp when job was processed
                 )
-                await db.execute(query, data)
+                await conn.execute(query, data)
                 rejected_count += 1
 
+            # Commit all changes
+            await conn.commit()
             print(f"Stored {applied_count} applied jobs and {rejected_count} rejected jobs in the database.")
 
         finally:
             # Close the database connection
-            await db.close()
+            await conn.close()
 
     except Exception as e:
         print(f"Error storing jobs in the database: {e}")
