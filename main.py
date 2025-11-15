@@ -198,7 +198,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
             
             try:
                 try: 
-                    apply_button: WebElement = await modal.find_element(By.XPATH, '//div[@class="styles_component__AUM9C flex flex-row justify-end"]/*[1]')
+                    apply_button: WebElement = await modal.find_element(By.XPATH, '//button[@data-test="JobDescriptionSlideIn--SubmitButton"]/*[1]')
                     await driver.sleep(1)
                 except: 
                     print("Apply button not found")
@@ -209,7 +209,7 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                     continue
 
                 try: 
-                    skills: WebElement = await modal.find_element(By.XPATH, './/div[@class="flex flex-col gap-2"]')
+                    skills: WebElement = await modal.find_element(By.XPATH, './/span[text()="Skills"]/following-sibling::div[1]')
                 except:
                     print("Skills not found")
                     skills = None
