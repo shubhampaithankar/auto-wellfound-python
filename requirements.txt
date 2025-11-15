@@ -1,0 +1,5 @@
+selenium-driverless
+selenium
+python-dotenv
+aiomysql
+

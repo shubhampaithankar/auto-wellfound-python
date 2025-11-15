@@ -2,6 +2,7 @@ import asyncio
 import sys
 import io
 import re
+import os
 
 from selenium_driverless import webdriver
 from selenium_driverless.types.webelement import WebElement
@@ -479,13 +480,23 @@ async def send_email():
 async def main():
     options = webdriver.ChromeOptions()
 
+    # Set Chrome executable path if specified in settings
+    if chrome_path and os.path.exists(chrome_path):
+        options.binary_location = chrome_path
+    elif chrome_path:
+        print(f"Warning: Specified Chrome path '{chrome_path}' does not exist. Attempting auto-detect...")
+
     if not headless:
         dark_reader = 'extension/dark-reader.zip'
-        options.add_extension(dark_reader)
+        if os.path.exists(dark_reader):
+            options.add_extension(dark_reader)
+        else:
+            print(f"Warning: Extension file '{dark_reader}' not found. Continuing without Dark Reader extension.")
     else:
         options.add_argument("--headless")
         options.add_argument("--incognito")
 
+    driver = None
     try:
         driver = await webdriver.Chrome(options=options)
         await driver.maximize_window()
@@ -514,9 +525,14 @@ async def main():
         if store_in_db: await store_jobs()
 
         if email: await send_email()
-    except WebDriverException as e:
+    except (WebDriverException, FileNotFoundError) as e:
         print(f"Error during main: {e}")
+        if isinstance(e, FileNotFoundError) and "Chrome" in str(e):
+            print("\nChrome/Chromium not found. Please:")
+            print("1. Install Google Chrome or Chromium, OR")
+            print("2. Specify the Chrome executable path in config/settings.py")
     finally:
-        await driver.close()
+        if driver is not None:
+            await driver.close()
 
 asyncio.run(main())
