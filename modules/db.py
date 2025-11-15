@@ -5,6 +5,8 @@ DB_NAME = "wellfound.db"
 
 # Global connection variable
 _db_conn: Optional[aiosqlite.Connection] = None
+# Track if database has been initialized
+_db_initialized: bool = False
 
 async def get_sqlite_connection(db_path: str = DB_NAME) -> Optional[aiosqlite.Connection]:
     """Create and return a SQLite database connection. Reuses existing connection if available."""
@@ -24,13 +26,21 @@ async def get_sqlite_connection(db_path: str = DB_NAME) -> Optional[aiosqlite.Co
 
 async def close_connection():
     """Close the database connection."""
-    global _db_conn
+    global _db_conn, _db_initialized
     if _db_conn is not None:
         await _db_conn.close()
         _db_conn = None
+        _db_initialized = False  # Reset initialization flag when closing
 
 async def init_database(conn: aiosqlite.Connection):
-    """Initialize the database with the job_applications table if it doesn't exist."""
+    """Initialize the database with the job_applications table if it doesn't exist.
+    This function is idempotent - it can be called multiple times safely."""
+    global _db_initialized
+    
+    # Skip if already initialized
+    if _db_initialized:
+        return
+    
     try:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS job_applications (
@@ -52,6 +62,7 @@ async def init_database(conn: aiosqlite.Connection):
             )
         """)
         await conn.commit()
+        _db_initialized = True
         print("Database table initialized successfully")
     except Exception as e:
         print(f"Error initializing database: {e}")
@@ -73,7 +84,7 @@ async def store_single_job(job_obj: Dict[str, Any], status: str) -> bool:
             print("Failed to get database connection for storing job")
             return False
         
-        # Ensure database is initialized
+        # Ensure database is initialized (idempotent - safe to call multiple times)
         await init_database(conn)
         
         # Prepare query for inserting job
@@ -107,4 +118,105 @@ async def store_single_job(job_obj: Dict[str, Any], status: str) -> bool:
     except Exception as e:
         print(f"Error storing job in database: {e}")
         return False
+
+async def initialize_database_connection() -> bool:
+    """Initialize the database connection and create tables if needed.
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        conn = await get_sqlite_connection()
+        if conn:
+            await init_database(conn)
+            return True
+        else:
+            print("Warning: Failed to initialize database. Jobs will not be stored.")
+            return False
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+        return False
+
+async def store_jobs(applied: list, rejected: list) -> None:
+    """Store multiple jobs (applied and rejected) in the database.
+    
+    Args:
+        applied: List of applied job dictionaries
+        rejected: List of rejected job dictionaries
+    """
+    try:
+        # Create SQLite connection
+        conn = await get_sqlite_connection()
+        if not conn: 
+            print("Failed to establish database connection.")
+            return
+
+        # Initialize counters
+        applied_count = 0
+        rejected_count = 0
+
+        try:
+            # Initialize database table
+            await init_database(conn)
+
+            # Prepare query for inserting jobs (SQLite uses ? placeholders)
+            query = """
+                INSERT INTO job_applications 
+                (company_name, position, remote_policy, compensation, skills, description, status, notes, url, type, location, exp_required, application_date, time) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+
+            # Store applied jobs
+            for job in applied:
+                data = (
+                    job.get('company_name', 'Unknown Company'),  # Use fallback value
+                    job.get('position', 'Unknown Position'),     # Use fallback value
+                    job.get('remote_policy', None),
+                    job.get('compensation', None),
+                    job.get('skills', None),
+                    job.get('description', None),
+                    'applied',  # status
+                    None,  # notes is null for applied jobs
+                    job.get('url', None),
+                    job.get('type', None),
+                    job.get('location', None),
+                    job.get('exp_required', None),
+                    job.get('application_date', None),
+                    job.get('time'),  # timestamp when job was processed
+                )
+                await conn.execute(query, data)
+                applied_count += 1
+
+            # Store rejected jobs
+            for job in rejected:
+                data = (
+                    job.get('company_name', 'Unknown Company'),  # Use fallback value
+                    job.get('position', 'Unknown Position'),     # Use fallback value
+                    job.get('remote_policy', None),
+                    job.get('compensation', None),
+                    job.get('skills', None),
+                    job.get('description', None),
+                    'rejected',  # status
+                    job.get('notes', None),  # notes for rejection reason
+                    job.get('url', None),
+                    job.get('type', None),
+                    job.get('location', None),
+                    job.get('exp_required', None),
+                    job.get('application_date', None),  # null for rejected jobs
+                    job.get('time'),  # timestamp when job was processed
+                )
+                await conn.execute(query, data)
+                rejected_count += 1
+
+            # Commit all changes
+            await conn.commit()
+            print(f"Stored {applied_count} applied jobs and {rejected_count} rejected jobs in the database.")
+
+        except Exception as e:
+            print(f"Error storing jobs in database: {e}")
+            raise e
+
+    except Exception as e:
+        print(f"Error in store_jobs: {e}")
+        raise e
 

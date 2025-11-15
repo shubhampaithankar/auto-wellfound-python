@@ -212,6 +212,9 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
             await job.click()
             # await driver.sleep(3)
             # wait for job modal to open
+            close_button = None
+            modal = None
+            
             try: 
                 modal: WebElement = await driver.find_element(By.XPATH, './/div[contains(@class, "ReactModal__Content")]', timeout=15)
                 await driver.sleep(1)
@@ -385,10 +388,27 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 rejected.append(job_obj)
                 continue
             finally:
-                if await close_button.is_visible():
-                    await close_button.click()
-                    await driver.sleep(1)
-                else: return
+                # Safely close the modal if it's still open
+                try:
+                    if close_button is not None:
+                        try:
+                            # Try to check if button is visible (might fail if element is stale)
+                            if await close_button.is_visible():
+                                await close_button.click()
+                                await driver.sleep(1)
+                        except Exception:
+                            # Element might be stale, try to find it again
+                            try:
+                                close_button_new = await driver.find_element(By.XPATH, '//button[@data-test="closeButton"]/*[1]', timeout=2)
+                                if await close_button_new.is_visible():
+                                    await close_button_new.click()
+                                    await driver.sleep(1)
+                            except Exception:
+                                # Modal might already be closed or page changed, ignore
+                                pass
+                except Exception as e:
+                    # Ignore errors when trying to close modal
+                    pass
                 
     except WebDriverException as e:
         print("error in process_jobs")
@@ -494,84 +514,6 @@ async def start_applying(driver: webdriver.Chrome):
         print(f"Error during start_applying")
         raise e
 
-async def store_jobs():
-    try:
-        # Create SQLite connection
-        conn = await get_sqlite_connection()
-        if not conn: 
-            print("Failed to establish database connection.")
-            return
-
-        # Initialize counters
-        applied_count = 0
-        rejected_count = 0
-
-        global applied, rejected
-
-        try:
-            # Initialize database table
-            await init_database(conn)
-
-            # Prepare query for inserting jobs (SQLite uses ? placeholders)
-            query = """
-                INSERT INTO job_applications 
-                (company_name, position, remote_policy, compensation, skills, description, status, notes, url, type, location, exp_required, application_date, time) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-
-            # Store applied jobs
-            for job in applied:
-                data = (
-                    job.get('company_name', 'Unknown Company'),  # Use fallback value
-                    job.get('position', 'Unknown Position'),     # Use fallback value
-                    job.get('remote_policy', None),
-                    job.get('compensation', None),
-                    job.get('skills', None),
-                    job.get('description', None),
-                    'applied',  # status
-                    None,  # notes is null for applied jobs
-                    job.get('url', None),
-                    job.get('type', None),
-                    job.get('location', None),
-                    job.get('exp_required', None),
-                    job.get('application_date', None),
-                    job.get('time'),  # timestamp when job was processed
-                )
-                await conn.execute(query, data)
-                applied_count += 1
-
-            # Store rejected jobs
-            for job in rejected:
-                data = (
-                    job.get('company_name', 'Unknown Company'),  # Use fallback value
-                    job.get('position', 'Unknown Position'),     # Use fallback value
-                    job.get('remote_policy', None),
-                    job.get('compensation', None),
-                    job.get('skills', None),
-                    job.get('description', None),
-                    'rejected',  # status
-                    job.get('notes', None),  # notes for rejection reason
-                    job.get('url', None),
-                    job.get('type', None),
-                    job.get('location', None),
-                    job.get('exp_required', None),
-                    job.get('application_date', None),  # null for rejected jobs
-                    job.get('time'),  # timestamp when job was processed
-                )
-                await conn.execute(query, data)
-                rejected_count += 1
-
-            # Commit all changes
-            await conn.commit()
-            print(f"Stored {applied_count} applied jobs and {rejected_count} rejected jobs in the database.")
-
-        finally:
-            # Close the database connection
-            await conn.close()
-
-    except Exception as e:
-        print(f"Error storing jobs in the database: {e}")
-        raise e
 
 # main function
 async def main():
@@ -595,11 +537,7 @@ async def main():
 
     # Initialize database connection if storing in DB
     if store_in_db:
-        conn = await get_sqlite_connection()
-        if conn:
-            await init_database(conn)
-        else:
-            print("Warning: Failed to initialize database. Jobs will not be stored.")
+        await initialize_database_connection()
 
     driver = None
     try:
