@@ -1,3 +1,10 @@
+"""
+Wellfound Job Application Automation Script
+
+Note: For real-time log output, you can also run this script with:
+    python -u main.py
+The -u flag forces unbuffered output.
+"""
 import asyncio
 import sys
 import io
@@ -17,7 +24,12 @@ from config.settings import *
 from config.search import *
 from config.secrets import *  # This will load .env file
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# Configure stdout for real-time logging (unbuffered)
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True)
+
+# Also set Python to run in unbuffered mode
+os.environ['PYTHONUNBUFFERED'] = '1'
 
 count = 0
 limit = 5
