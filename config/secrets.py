@@ -1,18 +1,22 @@
-email="shubhampaithankar65@gmail.com"
-password="REMOVED"
+import os
+from dotenv import load_dotenv
 
-# Email service configuration (optional - leave empty to use SMTP)
-# Option 1: Use SendGrid (recommended - free tier available)
-# Get API key from: https://app.sendgrid.com/settings/api_keys
-sendgrid_api_key=""  # e.g., "SG.xxxxxxxxxxxxx"
-from_email=""  # Email address to send from (can be different from login email)
-to_email=""  # Email address to receive reports (defaults to email if empty)
+# Load environment variables from .env file
+load_dotenv()
 
-# Option 2: Use SMTP (Gmail, Outlook, etc.)
-# If sendgrid_api_key is empty, SMTP will be used with the email/password above
+# Wellfound login credentials
+email = os.getenv("WELLFOUND_EMAIL", "")
+password = os.getenv("WELLFOUND_PASSWORD", "")
 
-mysql_host="localhost"
-mysql_port=3306
-mysql_user="root"
-mysql_password=""
-mysql_database=""
+# Email service configuration
+# Use Resend (FREE - 3,000 emails/month) - Recommended
+# Get API key from: https://resend.com/api-keys
+resend_api_key = os.getenv("RESEND_API_KEY", "")
+
+# Email addresses
+from_email = os.getenv("FROM_EMAIL", "")  # Email address to send from (can be different from login email)
+to_email = os.getenv("TO_EMAIL", "")  # Email address to receive reports (defaults to email if empty)
+
+# Fallback: SMTP (Gmail, Outlook, etc.)
+# If RESEND_API_KEY is not set, SMTP will be used with the email/password above
+# For Gmail, you may need to use an App Password instead of your regular password

@@ -3,30 +3,19 @@ import sys
 import io
 import re
 import os
-import csv
-import smtplib
-import base64
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
-from datetime import datetime
 
 from selenium_driverless import webdriver
 from selenium_driverless.types.webelement import WebElement
 from selenium_driverless.types.by import By
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
-from dotenv import load_dotenv
-
 from modules.helper import *
 from modules.db import *
+from modules.email import send_email_report
 
 from config.settings import *
 from config.search import *
-from config.secrets import *
-
-load_dotenv()
+from config.secrets import *  # This will load .env file
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
@@ -37,6 +26,7 @@ reason = ""
 applied = []
 rejected = []
 
+# below functions are called sequentially
 async def login(driver: webdriver.Chrome, retries=3):
     try:
         try: email_field = await driver.find_element(By.XPATH, '//input[@placeholder="Email"]', timeout=15)
@@ -571,189 +561,7 @@ async def store_jobs():
         print(f"Error storing jobs in the database: {e}")
         raise e
 
-async def send_email_report():
-    try:
-        global applied, rejected
-        
-        if len(applied) == 0 and len(rejected) == 0:
-            print("No jobs to report. Skipping email.")
-            return
-        
-        # Create CSV file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_filename = f"job_report_{timestamp}.csv"
-        
-        # Define CSV columns
-        fieldnames = [
-            'status', 'company_name', 'position', 'remote_policy', 'compensation',
-            'location', 'type', 'exp_required', 'skills', 'url', 
-            'application_date', 'time', 'notes'
-        ]
-        
-        # Write CSV file
-        with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            # Write applied jobs
-            for job in applied:
-                writer.writerow({
-                    'status': 'applied',
-                    'company_name': job.get('company_name', ''),
-                    'position': job.get('position', ''),
-                    'remote_policy': job.get('remote_policy', ''),
-                    'compensation': job.get('compensation', ''),
-                    'location': job.get('location', ''),
-                    'type': job.get('type', ''),
-                    'exp_required': job.get('exp_required', ''),
-                    'skills': job.get('skills', ''),
-                    'url': job.get('url', ''),
-                    'application_date': job.get('application_date', ''),
-                    'time': job.get('time', ''),
-                    'notes': job.get('notes', '')
-                })
-            
-            # Write rejected jobs
-            for job in rejected:
-                writer.writerow({
-                    'status': 'rejected',
-                    'company_name': job.get('company_name', ''),
-                    'position': job.get('position', ''),
-                    'remote_policy': job.get('remote_policy', ''),
-                    'compensation': job.get('compensation', ''),
-                    'location': job.get('location', ''),
-                    'type': job.get('type', ''),
-                    'exp_required': job.get('exp_required', ''),
-                    'skills': job.get('skills', ''),
-                    'url': job.get('url', ''),
-                    'application_date': job.get('application_date', ''),
-                    'time': job.get('time', ''),
-                    'notes': job.get('notes', '')
-                })
-        
-        print(f"CSV report created: {csv_filename}")
-        
-        # Determine email addresses
-        sender_email = from_email if from_email else email
-        recipient = to_email if to_email else email
-        
-        # Check if SendGrid API key is configured
-        if sendgrid_api_key:
-            # Use SendGrid API
-            try:
-                import requests
-                
-                # Read CSV file content
-                with open(csv_filename, 'rb') as f:
-                    csv_content = f.read()
-                
-                # SendGrid API endpoint
-                url = "https://api.sendgrid.com/v3/mail/send"
-                
-                # Prepare email data
-                email_data = {
-                    "personalizations": [{
-                        "to": [{"email": recipient}],
-                        "subject": f"Job Application Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                    }],
-                    "from": {"email": sender_email},
-                    "content": [{
-                        "type": "text/plain",
-                        "value": f"""Job Application Report
-
-Summary:
-- Applied: {len(applied)} jobs
-- Rejected: {len(rejected)} jobs
-- Total: {len(applied) + len(rejected)} jobs
-
-Please find the detailed CSV report attached."""
-                    }],
-                    "attachments": [{
-                        "content": base64.b64encode(csv_content).decode('utf-8'),
-                        "filename": csv_filename,
-                        "type": "text/csv",
-                        "disposition": "attachment"
-                    }]
-                }
-                
-                headers = {
-                    "Authorization": f"Bearer {sendgrid_api_key}",
-                    "Content-Type": "application/json"
-                }
-                
-                response = requests.post(url, json=email_data, headers=headers)
-                response.raise_for_status()
-                print(f"Email report sent successfully via SendGrid to {recipient}")
-                
-            except ImportError:
-                print("Error: 'requests' package is required for SendGrid. Install it with: pip install requests")
-                print("Falling back to SMTP...")
-                sendgrid_api_key = None  # Fall back to SMTP
-            except Exception as e:
-                print(f"Error sending email via SendGrid: {e}")
-                print("Falling back to SMTP...")
-                sendgrid_api_key = None  # Fall back to SMTP
-        
-        # Use SMTP if SendGrid is not configured or failed
-        if not sendgrid_api_key:
-            # Create email message
-            msg = MIMEMultipart()
-            msg['From'] = sender_email
-            msg['To'] = recipient
-            msg['Subject'] = f"Job Application Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            
-            # Email body
-            body = f"""
-            Job Application Report
-            
-            Summary:
-            - Applied: {len(applied)} jobs
-            - Rejected: {len(rejected)} jobs
-            - Total: {len(applied) + len(rejected)} jobs
-            
-            Please find the detailed CSV report attached.
-            """
-            msg.attach(MIMEText(body, 'plain'))
-            
-            # Attach CSV file
-            with open(csv_filename, 'rb') as attachment:
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(attachment.read())
-                encoders.encode_base64(part)
-                part.add_header(
-                    'Content-Disposition',
-                    f'attachment; filename= {csv_filename}'
-                )
-                msg.attach(part)
-            
-            # Send email using SMTP
-            try:
-                server = smtplib.SMTP('smtp.gmail.com', 587)
-                server.starttls()
-                server.login(email, password)
-                text = msg.as_string()
-                server.sendmail(sender_email, recipient, text)
-                server.quit()
-                print(f"Email report sent successfully via SMTP to {recipient}")
-            except Exception as e:
-                print(f"Error sending email: {e}")
-                print("Note: If using Gmail, you may need to:")
-                print("1. Enable 'Less secure app access' OR")
-                print("2. Use an App Password instead of your regular password")
-                raise e
-        
-        # Clean up CSV file
-        try:
-            if os.path.exists(csv_filename):
-                os.remove(csv_filename)
-                print(f"Temporary CSV file {csv_filename} removed")
-        except Exception as e:
-            print(f"Warning: Could not remove temporary CSV file: {e}")
-                
-    except Exception as e:
-        print(f"Error in send_email_report: {e}")
-        raise e
-
+# main function
 async def main():
     options = webdriver.ChromeOptions()
 
@@ -810,7 +618,7 @@ async def main():
         # Jobs are now stored immediately as they're processed, so no need to call store_jobs()
         # The applied and rejected lists are kept for summary reporting
 
-        if send_email: await send_email_report()
+        if send_email: await send_email_report(applied, rejected)
     except (WebDriverException, FileNotFoundError) as e:
         print(f"Error during main: {e}")
         if isinstance(e, FileNotFoundError) and "Chrome" in str(e):
