@@ -2,4 +2,5 @@ selenium-driverless
 selenium
 python-dotenv
 aiosqlite
+requests  # Optional: Required only if using SendGrid for email reports
 
