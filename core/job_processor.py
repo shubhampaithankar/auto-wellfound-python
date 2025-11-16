@@ -12,12 +12,13 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
     Process job listings and apply to matching jobs.
     
     Returns:
-        tuple: (updated_count, updated_applied, updated_rejected)
+        int: Updated count of applied jobs
     """
     try:
         reason = ""
         for job in job_listings:
-            if count >= limit:
+            # If limit is 0, run unlimited; otherwise check limit
+            if limit > 0 and count >= limit:
                 break
                 
             position = "Position not found"

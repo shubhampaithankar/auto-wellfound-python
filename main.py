@@ -19,7 +19,7 @@ from core.orchestrator import start_applying
 from utils.captcha import detect_captcha
 from services.db import initialize_database_connection, close_connection
 from services.email import send_email_report
-from config.settings import store_in_db, send_email
+from config.settings import store_in_db, send_email, limit
 
 # Configure stdout for real-time logging (unbuffered)
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
@@ -30,7 +30,6 @@ os.environ['PYTHONUNBUFFERED'] = '1'
 
 # Global variables for tracking
 count = 0
-limit = 5
 applied = []
 rejected = []
 

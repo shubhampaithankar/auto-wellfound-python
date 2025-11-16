@@ -19,7 +19,8 @@ async def start_applying(driver: webdriver.Chrome, applied: list, rejected: list
     try:
         print("Starting to apply...")
         
-        while count < limit:
+        # If limit is 0, run unlimited until no more jobs
+        while limit == 0 or count < limit:
             companies = await load_companies(driver)
             if len(companies) == 0:
                 print(f"No companies found")
@@ -32,7 +33,7 @@ async def start_applying(driver: webdriver.Chrome, applied: list, rejected: list
                     if company is False:
                         continue
 
-                if count >= limit:
+                if limit > 0 and count >= limit:
                     print("Limit reached")
                     break
                 
