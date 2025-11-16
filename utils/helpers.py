@@ -24,18 +24,6 @@ async def scroll_to(driver: webdriver.Chrome, element: WebElement):
     try: await driver.execute_script('arguments[0].scrollIntoView({block: "center"});', element)
     except WebDriverException as e:
         raise e
-    
-async def detect_captcha(driver: webdriver.Chrome):
-    """Detect CAPTCHA on the page."""
-    try:
-        captcha_element = await driver.find_element(By.XPATH, '//iframe[contains(@src, "https://geo.captcha-delivery.com/captcha")]', timeout=5)
-        if captcha_element: return True
-        else: return False
-        # print("CAPTCHA detected, waiting for user to solve it...")
-
-        # await wait_for_disappearance(driver, captcha_element, timeout=5)
-    except: return False
- 
 
 def format_timestamp():
     # Format timestamp as dd-mm-yy:hh:mm:ss
@@ -96,4 +84,5 @@ def extract_experience(text: str, current_experience: int = 100):
             exp_text = f"{lower_limit}+ years"
             return (lower_limit, -1, exp_text, True)
     
-    return None  
+    return None
+

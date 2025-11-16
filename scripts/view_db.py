@@ -4,7 +4,7 @@ Run this script to see all stored job applications.
 """
 import asyncio
 import aiosqlite
-from modules.db import DB_NAME
+from services.db import DB_NAME
 
 async def view_database():
     """View all jobs in the database."""
