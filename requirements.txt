@@ -1,0 +1,6 @@
+selenium-driverless
+selenium
+python-dotenv
+aiosqlite
+requests  # Required for Resend email service
+

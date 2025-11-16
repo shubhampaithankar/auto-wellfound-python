@@ -2,7 +2,7 @@ current_experience = 1
 
 good_skills = [
     "javascript",
-    "typescript"
+    "typescript",
     "react",
     "angular",
     "node",
@@ -25,14 +25,18 @@ bad_skills = [
     "android",
     "ios",
     "swift",
-    "ruby"
+    "ruby",
     "devops",
     "dev ops",
     "unity",
     "salesforce",
     "crm",
     "laravel",
-    "django"
+    "django",
+    "cybersecurity",
+    "pentesting",
+    "penetration testing",
+    "ethical hacking"
 ]
 
 strict_bad_skills = [
