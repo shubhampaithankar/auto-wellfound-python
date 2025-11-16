@@ -13,6 +13,7 @@ import os
 
 from selenium_driverless import webdriver
 from selenium_driverless.types.webelement import WebElement
+from selenium_driverless.types.webelement import NoSuchElementException as DriverlessNoSuchElementException
 from selenium_driverless.types.by import By
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
@@ -250,44 +251,98 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                     rejected.append(job_obj)
                     continue
 
-                try: 
-                    # Find the Skills section - the div with class "flex flex-wrap" that contains skill tags
-                    skills: WebElement = await modal.find_element(By.XPATH, './/span[text()="Skills"]/following-sibling::div[@class="flex flex-wrap"]')
+                try:
+                    # Get the wrapper div containing all skills
+                    skills: WebElement = await modal.find_element(
+                        By.XPATH,
+                        './/span[text()="Skills"]/following-sibling::div[contains(@class, "flex")]'
+                    )
                 except:
                     print("Skills not found")
                     skills = None
+                    continue
 
                 if skills:
                     await scroll_to(modal, skills)
 
-                    skillsText = get_proper_string(await skills.text)
+                    # Get all individual skill tags inside the wrapper
+                    skill_items = await skills.find_elements(By.XPATH, './div')
+
+                    # Extract text
+                    skillsTextList = [await s.text for s in skill_items]
+                    skillsText = get_proper_string(" ".join(skillsTextList))
+
+                    print(skillsText)
+
                     job_obj['skills'] = skillsText
-
                     skills_low = skillsText.lower()
-
+                    
+                    # Split skills into individual words for comparison
+                    skill_words = skills_low.split()
+                    
+                    # Helper function to check if any word from job skills matches any skill in a list
+                    def word_matches_skill(word, skill_list):
+                        """Check if a word matches any skill (handles both single and multi-word skills)"""
+                        word_lower = word.lower().strip()
+                        for skill in skill_list:
+                            skill_lower = skill.lower().strip()
+                            # Exact match
+                            if word_lower == skill_lower:
+                                return skill
+                            # If skill is multi-word, check if word is part of it
+                            if ' ' in skill_lower and word_lower in skill_lower:
+                                return skill
+                            # If skill is single word and word contains it (for partial matches like "pentesting" contains "testing")
+                            if ' ' not in skill_lower and skill_lower in word_lower and len(skill_lower) >= 3:
+                                return skill
+                        return None
+                    
+                    # Check each word in job skills against good/bad skills
+                    # First check full phrases, then individual words
                     good_word = next((skill for skill in good_skills if skill.lower() in skills_low), False)
                     if not good_word:
+                        for word in skill_words:
+                            matched_skill = word_matches_skill(word, good_skills)
+                            if matched_skill:
+                                good_word = matched_skill
+                                break
+                    
+                    if not good_word:
+                        # Check full phrases first
                         bad_word = next((skill for skill in bad_skills if skill.lower() in skills_low), False)
+                        if not bad_word:
+                            # Then check each word
+                            for word in skill_words:
+                                matched_skill = word_matches_skill(word, bad_skills)
+                                if matched_skill:
+                                    bad_word = matched_skill
+                                    break
+                        
                         if bad_word:
                             reason = f'Found bad skill {bad_word}. Skipping.'
                             job_obj['notes'] = reason
-                            # Store rejection
                             if store_in_db:
                                 await store_single_job(job_obj, 'rejected')
                             rejected.append(job_obj)
                             continue
 
-
+                    # Check strict bad skills - first as phrases, then individual words
                     strict_bad_word = next((skill for skill in strict_bad_skills if skill.lower() in skills_low), False)
+                    if not strict_bad_word:
+                        for word in skill_words:
+                            matched_skill = word_matches_skill(word, strict_bad_skills)
+                            if matched_skill:
+                                strict_bad_word = matched_skill
+                                break
+                    
                     if strict_bad_word:
                         reason = f'Found strict bad skill {strict_bad_word}. Skipping.'
                         job_obj['notes'] = reason
-                        # Store rejection
                         if store_in_db:
                             await store_single_job(job_obj, 'rejected')
                         rejected.append(job_obj)
                         continue
-                
+
                 # check for required experience & bad words
                 try: description_dom: WebElement = await modal.find_element(By.XPATH, '//div[@id="job-description"]')
                 except: 
@@ -301,25 +356,70 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
 
                 desc_low = description.lower()
 
-                required_experience = re.compile(r'(?:\(\s*(\d+)\s*\)|(\d+))?\s*[-to]*\s*(\d+)?\+?\s*(year|yr)s?', re.IGNORECASE)
-                match = required_experience.search(desc_low)
+                # Check experience from job title
+                title_exp = extract_experience(position, current_experience)
+                
+                # Check experience from ul element in modal
+                ul_exp = None
+                try:
+                    ul_element = await modal.find_element(By.XPATH, './/ul[contains(@class, "flex flex-wrap")]', timeout=5)
+                    if ul_element:
+                        ul_text = await ul_element.text
+                        ul_exp = extract_experience(ul_text, current_experience)
+                except:
+                    pass  # ul element not found, continue
 
-                if match:
-                    lower_limit = int(match.group(1) or match.group(2) or 0)
-                    upper_limit = int(match.group(3)) if match.group(3) else current_experience
-                    exp_text = f"{lower_limit}-{upper_limit} years" if match.group(3) else f"{lower_limit}+ years"
+                # Check experience from description
+                desc_exp = extract_experience(desc_low, current_experience)
+
+                # Collect all experience requirements found
+                exp_requirements = []
+                if title_exp:
+                    exp_requirements.append(("title", title_exp))
+                if ul_exp:
+                    exp_requirements.append(("ul", ul_exp))
+                if desc_exp:
+                    exp_requirements.append(("description", desc_exp))
+
+                # Check if any requirement exceeds current experience
+                exp_check_failed = False
+                if exp_requirements:
+                    # Use the first found requirement for display, but check all
+                    source, (lower_limit, upper_limit, exp_text, is_minimum) = exp_requirements[0]
                     job_obj['exp_required'] = exp_text
-
-                    if not lower_limit <= current_experience <= upper_limit:
-                        reason = f"Not enough experience"
-                        job_obj['notes'] = reason
-                        # Store rejection
-                        if store_in_db:
-                            await store_single_job(job_obj, 'rejected')
-                        rejected.append(job_obj)
-                        continue
+                    
+                    # Check all sources - reject if any requires more experience
+                    for source_name, (lower, upper, exp_text_val, is_min) in exp_requirements:
+                        # For minimum requirements (e.g., "2 years" = at least 2 years)
+                        # Check if current_experience >= lower
+                        # For ranges (e.g., "2-5 years"), check if current_experience is within range
+                        if is_min:
+                            # Minimum requirement: check if current_experience >= lower
+                            if current_experience < lower:
+                                reason = f"Not enough experience (required: {exp_text_val}, found in {source_name})"
+                                job_obj['notes'] = reason
+                                # Store rejection
+                                if store_in_db:
+                                    await store_single_job(job_obj, 'rejected')
+                                rejected.append(job_obj)
+                                exp_check_failed = True
+                                break
+                        else:
+                            # Range requirement: check if current_experience is within range
+                            if not (lower <= current_experience <= upper):
+                                reason = f"Not enough experience (required: {exp_text_val}, found in {source_name})"
+                                job_obj['notes'] = reason
+                                # Store rejection
+                                if store_in_db:
+                                    await store_single_job(job_obj, 'rejected')
+                                rejected.append(job_obj)
+                                exp_check_failed = True
+                                break
                 else:
                     job_obj['exp_required'] = None
+                
+                if exp_check_failed:
+                    continue
                 
                 skip = False
                 for word in bad_words:
@@ -453,6 +553,11 @@ async def start_applying(driver: webdriver.Chrome):
             
             for company in companies:
 
+                if company is False:
+                    await driver.sleep(2)
+                    if company is False:
+                        continue
+
                 if count > limit:
                     print("Limit reached")
                     break
@@ -461,11 +566,13 @@ async def start_applying(driver: webdriver.Chrome):
 
                 # scroll to company
                 await scroll_to(driver, company)
+                await driver.sleep(2)
 
                 # hide button for the company -> bottom right
-                try: hide_button: WebElement = await company.find_element(By.XPATH, './/button[text()="Hide"]')
-                except NoSuchElementException:
-                    print(f"Hide button not found") 
+                try: 
+                    hide_button: WebElement = await company.find_element(By.XPATH, './/button[normalize-space(text())="Hide"]')
+                except (NoSuchElementException, DriverlessNoSuchElementException):
+                    print(f"Hide button not found, moving to next company") 
                     continue
                 
                 try: 
@@ -577,7 +684,12 @@ async def main():
             print("2. Specify the Chrome executable path in config/settings.py")
     finally:
         if driver is not None:
-            await driver.close()
+            try:
+                await driver.close()
+            except (AttributeError, Exception) as e:
+                # Handle selenium_driverless library bug when closing
+                # The script has already completed successfully, so we can safely ignore this
+                print(f"Note: Error closing driver (non-critical): {type(e).__name__}")
         # Close database connection
         if store_in_db:
             await close_connection()
