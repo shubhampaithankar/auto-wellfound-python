@@ -74,6 +74,7 @@ Edit `config/settings.py`:
 - `send_email = False` - Send email report when done
 - `hide_companies = False` - Hide companies after processing
 - `limit = 5` - Number of jobs to apply to (set to `0` for unlimited)
+- `location_type = ["remote"]` - Filter by location: List of allowed types (`"remote"`, `"in office"`, `"hybrid"`). Use `[]` for all types
 
 ### 4. Run
 
@@ -177,9 +178,28 @@ After skills pass, the script checks the job description:
    - If any bad word found → job is rejected
    - Example: Job with "unpaid internship" → rejected
 
+### Location Filter
+
+The script filters jobs based on the `location_type` setting in `config/settings.py`:
+
+- `location_type = ["remote"]` - Only accepts remote jobs
+- `location_type = ["remote", "hybrid"]` - Accepts remote and hybrid jobs (rejects in-office)
+- `location_type = ["in office"]` - Only accepts in-office jobs
+- `location_type = ["hybrid"]` - Only accepts hybrid jobs
+- `location_type = []` - Accepts all location types (no filter)
+
+**Examples:**
+
+```python
+location_type = ["remote", "hybrid"]  # Remote and hybrid, but not in-office
+location_type = ["remote"]            # Only remote
+location_type = []                    # All location types
+```
+
+The check is case-insensitive and uses substring matching (e.g., "remote" matches "Remote - US", "Fully Remote", etc.)
+
 ### Other Filters
 
-- **Remote policy**: Rejects jobs with "in office" in location/remote policy
 - **Position check**: Rejects if position title cannot be found
 - **Compensation check**: Rejects if compensation info cannot be found
 

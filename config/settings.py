@@ -11,3 +11,11 @@ hide_companies = False
 
 # Number of jobs to apply to
 limit = 5
+
+# Location type filter: List of allowed location types
+# Options: "remote", "in office", "hybrid"
+# Examples:
+#   ["remote"] - Only remote jobs
+#   ["remote", "hybrid"] - Remote and hybrid jobs (not in-office)
+#   [] - Accept all location types (no filter)
+location_type = ["remote"]
