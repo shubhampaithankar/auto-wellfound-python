@@ -5,7 +5,7 @@ from selenium.common.exceptions import WebDriverException
 from utils.helpers import get_proper_string, format_timestamp, extract_experience, scroll_to
 from services.db import store_single_job
 from config.search import current_experience, good_skills, bad_skills, strict_bad_skills, bad_words
-from config.settings import store_in_db
+from config.settings import store_in_db, location_type
 
 async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement], company_name: str, applied: list, rejected: list, count: int, limit: int):
     """
@@ -63,18 +63,28 @@ async def process_jobs(driver: webdriver.Chrome, job_listings: list[WebElement],
                 job_obj['remote_policy'] = remote_policy
                 job_obj['location'] = remote_policy  # Store location as well
 
-                if "in office" in remote_policy.lower():
-                    reason = f'{position} is not remote'
-                    job_obj['notes'] = reason
-                    # Store early rejection
-                    if store_in_db:
-                        await store_single_job(job_obj, 'rejected')
-                    rejected.append(job_obj)
-                    continue
+                # Filter by location type if specified
+                if location_type and len(location_type) > 0:  # Only filter if location_type is not empty
+                    remote_policy_lower = remote_policy.lower()
+                    
+                    # Check if job's location contains any of the allowed location types
+                    location_matched = False
+                    for allowed_type in location_type:
+                        if allowed_type.lower() in remote_policy_lower:
+                            location_matched = True
+                            break
+                    
+                    if not location_matched:
+                        reason = f'{position} location type not in allowed types: {location_type} (found: {remote_policy})'
+                        job_obj['notes'] = reason
+                        if store_in_db:
+                            await store_single_job(job_obj, 'rejected')
+                        rejected.append(job_obj)
+                        continue
 
                 await driver.sleep(0.5)
             except:                     
-                reason = f"{remote_policy}"
+                reason = f"Location/remote policy not found"
                 job_obj['notes'] = reason
                 # Store early rejection
                 if store_in_db:
