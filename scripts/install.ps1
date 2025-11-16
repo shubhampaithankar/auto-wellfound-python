@@ -153,6 +153,8 @@ Write-Host "2. Activate the virtual environment:" -ForegroundColor White
 Write-Host "   venv\Scripts\Activate.ps1" -ForegroundColor Gray
 Write-Host ""
 Write-Host "3. Run the script:" -ForegroundColor White
+Write-Host "   .\run.ps1" -ForegroundColor Gray
+Write-Host "   or" -ForegroundColor Gray
 Write-Host "   python -u main.py" -ForegroundColor Gray
 Write-Host ""
 

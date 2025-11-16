@@ -140,6 +140,8 @@ echo 2. Activate the virtual environment:
 echo    venv\Scripts\activate.bat
 echo.
 echo 3. Run the script:
+echo    .\run.bat
+echo    or
 echo    python -u main.py
 echo.
 pause
